@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    
+    <title>VR Project: Start with Models</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    
+    <script>
+      window.digiState = { station1: 1, station2: 1, station3: 1 };
+      window.isOmegamonActive = false; 
+      window.globalBgmVol = 0.1; 
+      window.globalVidVol = 1.0;
+
+      window.onload = function() {
+        localStorage.clear();
+        sessionStorage.clear();
+        console.log("System Refreshed: All Data Cleared.");
+      };
+    </script>
+    
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: black; }
+      #intro {
+        position: fixed; inset: 0; background: radial-gradient(circle at center, rgba(5,26,42,0.9), rgba(0,0,0,1));
+        color: #00ffff; display: flex; flex-direction: column; justify-content: center;
+        align-items: center; z-index: 9999; text-align: center;
+        font-family: 'Courier New', Courier, monospace; backdrop-filter: blur(5px);
+      }
+      #intro h1 { font-size: 3rem; margin-bottom: 10px; text-shadow: 0 0 15px #00ffff; }
+      #intro p { font-size: 1.2rem; color: #00ffaa; margin-bottom: 40px; }
+      #intro button {
+        border: none; border-radius: 5px; background: #333; color: #777;
+        padding: 15px 40px; font-size: 1.5rem; font-weight: bold; cursor: wait;
+        transition: all 0.3s;
+      }
+      #intro button.ready {
+        background: #1DB954; color: #111; cursor: pointer;
+        box-shadow: 0 0 20px #1DB954;
+      }
+      #intro button.ready:hover { transform: scale(1.1); box-shadow: 0 0 30px #1DB954; }
+      #intro button.ready:active { transform: scale(0.95); }
+
+      #loading-panel {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        padding: 15px 20px;
+        border-radius: 10px;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 14px;
+        z-index: 9999;
+        pointer-events: none;
+        border: 1px solid #444;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        min-width: 220px;
+      }
+      #loading-panel h3 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+        border-bottom: 1px solid #666;
+        padding-bottom: 8px;
+        text-align: center;
+        color: #00ffcc;
+      }
+      .status-item {
+        display: flex;
+        justify-content: space-between;
+        margin: 6px 0;
+        padding-bottom: 4px;
+        border-bottom: 1px dashed #333;
+      }
+      .status-name { font-weight: bold; text-transform: capitalize; }
+      .status-loading { color: #ffaa00; font-weight: bold; }
+      .status-loaded { color: #00ff00; font-weight: bold; }
+    </style>
+    
+    <script>
+      // ระบบปรับขนาดขั้นสุดยอด บังคับให้อยู่ในกรอบแท่น และหันหน้าตรงเสมอ
+      AFRAME.registerComponent('auto-fit', {
+        schema: {
+          maxWidth: { type: 'number', default: 2.8 },  // ความกว้างสูงสุด (ไม่ล้นฐานแท่น)
+          maxHeight: { type: 'number', default: 3.5 }, // ความสูงสูงสุด (หัวไม่ทะลุเพดาน)
+          maxDepth: { type: 'number', default: 2.8 }   // ความลึกสูงสุด
+        },
+        init: function () {
+          this.el.addEventListener('model-loaded', () => {
+            setTimeout(() => {
+              let mesh = this.el.getObject3D('mesh');
+              if (!mesh) return;
+
+              // ล้างค่าเก่าทั้งหมด เพื่อให้คำนวณจากขนาดออริจินัล (1:1) ใหม่ทุกครั้ง
+              this.el.object3D.scale.set(1, 1, 1);
+              this.el.object3D.rotation.set(0, 0, 0); // บังคับให้ Entity หันหน้าตรง
+              mesh.position.set(0, 0, 0);
+              mesh.rotation.set(0, 0, 0); // บังคับ Mesh ภายในให้หันหน้าตรง
+              mesh.updateMatrixWorld(true);
+
+              let box = new THREE.Box3().setFromObject(mesh);
+              if (box.isEmpty()) return;
+
+              let size = new THREE.Vector3();
+              box.getSize(size);
+
+              if (size.x <= 0.001 || size.y <= 0.001 || size.z <= 0.001) return;
+              if (!isFinite(size.x) || !isFinite(size.y) || !isFinite(size.z)) return;
+
+              let worldCenter = new THREE.Vector3();
+              box.getCenter(worldCenter);
+              let localCenter = this.el.object3D.worldToLocal(worldCenter.clone());
+
+              // ดึงเข้ากึ่งกลางแท่นพอดีเป๊ะ
+              mesh.position.x = -localCenter.x;
+              mesh.position.z = -localCenter.z;
+              // ดันให้เท้าแตะพื้นแท่นพอดี
+              mesh.position.y = -(localCenter.y - (size.y / 2));
+
+              // คำนวณ Scale ใหม่เพื่อให้ฟิตพอดีกับกรอบของแท่น
+              let scaleX = this.data.maxWidth / size.x;
+              let scaleY = this.data.maxHeight / size.y;
+              let scaleZ = this.data.maxDepth / size.z;
+              
+              // ใช้ค่าน้อยสุด เพื่อรับประกันว่าไม่มีส่วนไหนทะลุกรอบออกไปเด็ดขาด
+              let finalScale = Math.min(scaleX, scaleY, scaleZ);
+              
+              this.el.setAttribute('scale', `${finalScale} ${finalScale} ${finalScale}`);
+            }, 100);
+          });
+        }
+      });
+    </script>
+
+    <script>
+      AFRAME.registerComponent('lab-boundary', {
+        tick: function () {
+          let pos = this.el.object3D.position;
+          if (pos.y < 10) {
+            let limitRadius = 11.2;
+            let currentDist = Math.sqrt(pos.x * pos.x + pos.z * pos.z);
+            if (currentDist > limitRadius) {
+              let ratio = limitRadius / currentDist;
+              pos.x *= ratio;
+              pos.z *= ratio;
+            }
+          }
+        }
+      });
+    </script>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const assets = document.querySelector('a-assets');
+        const btn = document.getElementById('dive-btn');
+        const status = document.getElementById('loading-status');
+        
+        let dots = 0;
+        let loadAnim = setInterval(() => {
+          dots = (dots + 1) % 4;
+          if(!btn.classList.contains('ready')) {
+            btn.innerHTML = "LOADING ASSETS" + ".".repeat(dots);
+          }
+        }, 500);
+
+        const finishLoading = () => {
+          clearInterval(loadAnim);
+          btn.disabled = false;
+          btn.innerHTML = "INITIALIZE DIVE";
+          btn.classList.add('ready');
+          status.innerHTML = "SYSTEM STATUS: ONLINE<br>DESTINATION: DIGITAL WORLD<br><span style='color: #00ff00;'>[ ALL DATA SYNCED 100% ]</span>";
+        };
+
+        if (assets.hasLoaded) {
+          finishLoading();
+        } else {
+          assets.addEventListener('loaded', finishLoading);
+          assets.addEventListener('timeout', finishLoading); 
+        }
+
+        window.addEventListener('click', () => {
+            let bgVideo = document.querySelector('#bg-video');
+            if(bgVideo && bgVideo.paused) bgVideo.play();
+        }, {once: true});
+      });
+    </script>
+
+    <script>
+      let isDiving = false;
+
+      function startDiveSequence() {
+        if(isDiving) return;
+        isDiving = true;
+        document.getElementById('intro').style.display = 'none';
+
+        let camRig = document.querySelector('#camera-rig');
+        let cam = document.querySelector('#player-camera');
+        let startEnv = document.querySelector('#start-environment');
+        let pcCover = document.querySelector('#pc-screen-cover');
+        let typeText = document.querySelector('#typewriter-text');
+        let wormhole = document.querySelector('#digital-wormhole');
+        let fadeScreen = document.querySelector('#fade-screen');
+        let bgVideo = document.querySelector('#bg-video');
+
+        let sfxTyping = document.querySelector('#sfx-typing');
+        let sfxGate = document.querySelector('#sfx-gate');
+        let sfxWormhole = document.querySelector('#sfx-wormhole');
+        
+        [sfxTyping, sfxGate, sfxWormhole].forEach(sfx => {
+            if(sfx) { sfx.muted = true; sfx.play().then(() => { sfx.pause(); sfx.currentTime = 0; sfx.muted = false; }).catch(e => {}); }
+        });
+
+        if(bgVideo) { bgVideo.volume = window.globalBgmVol; bgVideo.play().catch(e=>{}); }
+
+        cam.setAttribute('look-controls', 'enabled', false);
+        cam.setAttribute('wasd-controls', 'enabled', false);
+        cam.object3D.rotation.set(0, 0, 0);
+
+        camRig.setAttribute('animation__zoom', 'property: position; to: 0 1000 -3.4; dur: 2500; easing: easeInOutCubic');
+
+        setTimeout(() => {
+            pcCover.setAttribute('visible', 'true');
+            let msg = "LINKING TO DIGITAL WORLD...";
+            let charIndex = 0;
+            
+            if(sfxTyping) { sfxTyping.loop = true; sfxTyping.volume = 0.5; sfxTyping.play().catch(e=>{}); }
+            
+            let typeInterval = setInterval(() => {
+                typeText.setAttribute('value', "> " + msg.substring(0, charIndex) + "_");
+                charIndex++;
+                if (charIndex > msg.length) {
+                    clearInterval(typeInterval);
+                    if(sfxTyping) sfxTyping.pause();
+
+                    setTimeout(() => {
+                        typeText.setAttribute('value', "> " + msg + "\n\n> [ GATE OPEN ]");
+                        typeText.setAttribute('color', '#00ff00');
+                        if(sfxGate) { sfxGate.currentTime = 0; sfxGate.volume = 0.8; sfxGate.play().catch(e=>{}); }
+                    }, 400);
+                }
+            }, 60);
+        }, 2500);
+
+        setTimeout(() => {
+            startEnv.setAttribute('visible', 'false');
+            wormhole.setAttribute('visible', 'true');
+            
+            if(sfxWormhole) { sfxWormhole.loop = true; sfxWormhole.volume = 0.6; sfxWormhole.play().catch(e=>{}); }
+            camRig.setAttribute('animation__dive', 'property: position; to: 0 1000 -80; dur: 2500; easing: easeInExpo');
+        }, 4800);
+
+        setTimeout(() => {
+            fadeScreen.setAttribute('visible', 'true');
+            fadeScreen.setAttribute('animation__flashin', 'property: opacity; to: 1; dur: 300');
+        }, 6900);
+
+        setTimeout(() => {
+            wormhole.setAttribute('visible', 'false');
+            if(sfxWormhole) sfxWormhole.pause();
+
+            camRig.removeAttribute('animation__zoom');
+            camRig.removeAttribute('animation__dive');
+            camRig.setAttribute('position', '0 0 2');
+            
+            fadeScreen.removeAttribute('animation__flashin');
+            fadeScreen.setAttribute('animation__flashout', 'property: opacity; to: 0; dur: 1500');
+
+            setTimeout(() => {
+                fadeScreen.setAttribute('visible', 'false');
+                pcCover.setAttribute('visible', 'false');
+                cam.setAttribute('look-controls', 'enabled', true);
+                cam.setAttribute('wasd-controls', 'enabled', true);
+            }, 1500);
+        }, 7200);
+      }
+    </script>
+
+    <script>
+      AFRAME.registerComponent('evolution-station', {
+        init: function () {
+          let station = this.el;
+          let stationId = station.getAttribute('data-station-id');
+          let menuPanel = station.querySelector('.evolution-menu');
+          let mainTerminal = station.querySelector('.main-terminal');
+          let digimon = station.querySelector('.digimon-entity');
+          let statusText = station.querySelector('.status-text');
+          let buttons = station.querySelectorAll('.evo-btn');
+          
+          let labEnvironment = document.querySelector('#lab-environment');
+          let cinemaEnvironment = document.querySelector('#cinema-environment');
+          let cinemaScreen = document.querySelector('#cinema-screen');
+          let dummyText = document.querySelector('#dummy-text');
+          let playerCam = document.querySelector('#player-camera');
+          let playerRig = document.querySelector('#camera-rig');
+          
+          this.isMenuOpen = false;
+          this.currentStage = 1;
+          let self = this;
+
+          self.savedPos = {x:0, y:0, z:0};
+          self.savedRot = {x:0, y:0};
+          self.wasBgmPlaying = false;
+
+          function updateMenuUI() {
+            buttons.forEach((btn, index) => {
+              let textEl = btn.querySelector('a-text');
+              let activeColor = btn.getAttribute('data-color');
+              let stageIndex = index + 1;
+              if (self.isMenuOpen) {
+                if (stageIndex <= self.currentStage + 1) { 
+                  btn.classList.add('clickable');
+                  btn.setAttribute('color', '#1a2b3c');
+                  textEl.setAttribute('color', activeColor);
+                  if (stageIndex === self.currentStage) btn.setAttribute('color', '#004466');
+                } else {
+                  btn.classList.remove('clickable');
+                  btn.setAttribute('color', '#0a0a0a');
+                  textEl.setAttribute('color', '#333333');
+                }
+              } else {
+                btn.classList.remove('clickable');
+              }
+            });
+          }
+
+          mainTerminal.addEventListener('click', function () {
+            self.isMenuOpen = !self.isMenuOpen;
+            menuPanel.setAttribute('visible', self.isMenuOpen);
+            updateMenuUI();
+          });
+
+          buttons.forEach((btn, index) => {
+            btn.addEventListener('click', function () {
+              let stageIndex = index + 1;
+              if (!self.isMenuOpen || stageIndex > self.currentStage + 1) return;
+
+              self.currentStage = stageIndex;
+              if (stationId) {
+                  window.digiState[stationId] = self.currentStage;
+                  station.sceneEl.emit('check-jogress');
+              }
+
+              let targetLevel = btn.getAttribute('data-level');
+              let targetColor = btn.getAttribute('data-color');
+              let targetVideoId = btn.getAttribute('data-video');
+              let targetModelFile = btn.getAttribute('data-model');
+
+              self.isMenuOpen = false;
+              menuPanel.setAttribute('visible', 'false');
+              updateMenuUI();
+
+              statusText.setAttribute('value', 'EVOLVING...\n' + targetLevel);
+              statusText.setAttribute('color', targetColor);
+
+              playerCam.setAttribute('wasd-controls', 'enabled', false);
+              
+              self.savedPos = { x: playerRig.object3D.position.x, y: playerRig.object3D.position.y, z: playerRig.object3D.position.z };
+              if (playerCam.components['look-controls']) {
+                  self.savedRot = { x: playerCam.components['look-controls'].pitchObject.rotation.x, y: playerCam.components['look-controls'].yawObject.rotation.y };
+                  playerCam.components['look-controls'].pitchObject.rotation.x = 0;
+                  playerCam.components['look-controls'].yawObject.rotation.y = 0;
+              }
+
+              let targetX = playerRig.object3D.position.x + playerCam.object3D.position.x;
+              let targetZ = playerRig.object3D.position.z + playerCam.object3D.position.z;
+              
+              cinemaEnvironment.setAttribute('position', `${targetX} 500 ${targetZ}`);
+              playerRig.setAttribute('position', `${self.savedPos.x} 500 ${self.savedPos.z}`);
+              labEnvironment.setAttribute('position', '0 -1000 0');
+              cinemaEnvironment.setAttribute('visible', 'true');
+
+              let bgVideo = document.querySelector('#bg-video');
+              if (bgVideo) { self.wasBgmPlaying = !bgVideo.paused; bgVideo.pause(); }
+
+              let finishEvolution = function() {
+                cinemaEnvironment.setAttribute('visible', 'false');
+                labEnvironment.setAttribute('position', '0 0 0');
+                playerCam.setAttribute('wasd-controls', 'enabled', true);
+
+                playerRig.setAttribute('position', `${self.savedPos.x} ${self.savedPos.y} ${self.savedPos.z}`);
+                if (playerCam.components['look-controls']) {
+                    playerCam.components['look-controls'].pitchObject.rotation.x = self.savedRot.x;
+                    playerCam.components['look-controls'].yawObject.rotation.y = self.savedRot.y;
+                }
+
+                if(targetModelFile) { 
+                    digimon.removeAttribute('gltf-model');
+                    digimon.setAttribute('visible', 'false');
+
+                    setTimeout(() => {
+                        digimon.setAttribute('gltf-model', targetModelFile);
+                        digimon.setAttribute('visible', 'true');
+                        statusText.setAttribute('value', targetLevel);
+                    }, 100);
+                } else {
+                    statusText.setAttribute('value', targetLevel);
+                }
+
+                if (bgVideo && self.wasBgmPlaying) { bgVideo.volume = window.globalBgmVol; bgVideo.play().catch(e => {}); }
+              };
+
+              let videoEl = document.querySelector(targetVideoId);
+              if(videoEl && videoEl.getAttribute('src') !== "") {
+                cinemaScreen.setAttribute('visible', 'true'); dummyText.setAttribute('visible', 'false');
+                cinemaScreen.setAttribute('src', targetVideoId); videoEl.currentTime = 0; videoEl.playbackRate = 1.0;
+                let speedBtn = document.querySelector('#btn-speed');
+                if(speedBtn) { speedBtn.setAttribute('color', '#1DB954'); speedBtn.querySelector('a-text').setAttribute('value', 'SPEED 1X'); }
+                videoEl.play().then(_ => { videoEl.onended = finishEvolution; }).catch(error => {
+                    cinemaScreen.setAttribute('visible', 'false'); dummyText.setAttribute('visible', 'true');
+                    dummyText.setAttribute('value', 'ERROR: VIDEO BROKEN!\n[ AUTO SKIP 3 SEC ]'); setTimeout(finishEvolution, 3000);
+                });
+              } else {
+                cinemaScreen.setAttribute('visible', 'false'); dummyText.setAttribute('visible', 'true');
+                dummyText.setAttribute('value', 'PLAYING CUTSCENE...\n[ ' + targetLevel + ' ]'); setTimeout(finishEvolution, 3000);
+              }
+            });
+          });
+        }
+      });
+    </script>
+
+    <script>
+      AFRAME.registerComponent('omegamon-system', {
+        init: function () {
+          let scene = this.el.sceneEl;
+          let altar = document.querySelector('#omegamon-altar');
+          let btn = document.querySelector('#btn-omegamon');
+          let st1 = document.querySelector('#station1');
+          let st2 = document.querySelector('#station2');
+          let omegaStation = document.querySelector('#omegamon-station');
+          let omegaModel = document.querySelector('#omega-model');
+          let btnCancel = document.querySelector('#btn-cancel-jogress');
+          let omegaTerminal = document.querySelector('#omega-terminal');
+          let omegaMenu = document.querySelector('#omega-menu');
+          let labEnvironment = document.querySelector('#lab-environment');
+          let cinemaEnvironment = document.querySelector('#cinema-environment');
+          let cinemaScreen = document.querySelector('#cinema-screen');
+          let dummyText = document.querySelector('#dummy-text');
+          let playerCam = document.querySelector('#player-camera');
+          let playerRig = document.querySelector('#camera-rig');
+
+          let isOmegaMenuOpen = false;
+          let savedPos = {x:0, y:0, z:0};
+          let savedRot = {x:0, y:0};
+          let wasBgmPlaying = false;
+
+          scene.addEventListener('check-jogress', () => {
+            if (window.digiState.station1 === 4 && window.digiState.station2 === 4 && !window.isOmegamonActive) {
+              altar.setAttribute('visible', 'true'); btn.classList.add('clickable');
+              document.querySelector('#omega-status').setAttribute('value', 'JOGRESS READY!');
+            } else {
+              altar.setAttribute('visible', 'false'); btn.classList.remove('clickable');
+            }
+          });
+
+          btn.addEventListener('click', () => {
+            window.isOmegamonActive = true; 
+            let targetVideoId = '#omega-vid';
+            altar.setAttribute('visible', 'false'); btn.classList.remove('clickable');
+            document.querySelector('#omega-status').setAttribute('value', 'OMEGAMON BORN!');
+
+            playerCam.setAttribute('wasd-controls', 'enabled', false);
+            savedPos = { x: playerRig.object3D.position.x, y: playerRig.object3D.position.y, z: playerRig.object3D.position.z };
+
+            if (playerCam.components['look-controls']) {
+              savedRot = { x: playerCam.components['look-controls'].pitchObject.rotation.x, y: playerCam.components['look-controls'].yawObject.rotation.y };
+              playerCam.components['look-controls'].pitchObject.rotation.x = 0;
+              playerCam.components['look-controls'].yawObject.rotation.y = 0;
+            }
+
+            let targetX = playerRig.object3D.position.x + playerCam.object3D.position.x;
+            let targetZ = playerRig.object3D.position.z + playerCam.object3D.position.z;
+            
+            cinemaEnvironment.setAttribute('position', `${targetX} 500 ${targetZ}`);
+            playerRig.setAttribute('position', `${savedPos.x} 500 ${savedPos.z}`);
+            labEnvironment.setAttribute('position', '0 -1000 0');
+            cinemaEnvironment.setAttribute('visible', 'true');
+
+            let bgVideo = document.querySelector('#bg-video');
+            if (bgVideo) { wasBgmPlaying = !bgVideo.paused; bgVideo.pause(); }
+
+            let finishEvolution = function() {
+              cinemaEnvironment.setAttribute('visible', 'false');
+              labEnvironment.setAttribute('position', '0 0 0');
+              playerCam.setAttribute('wasd-controls', 'enabled', true);
+
+              playerRig.setAttribute('position', `${savedPos.x} ${savedPos.y} ${savedPos.z}`);
+              if (playerCam.components['look-controls']) {
+                  playerCam.components['look-controls'].pitchObject.rotation.x = savedRot.x;
+                  playerCam.components['look-controls'].yawObject.rotation.y = savedRot.y;
+              }
+
+              st1.setAttribute('position', '-4 -100 -4');
+              st2.setAttribute('position', '0 -100 -5');
+              omegaStation.setAttribute('position', '-2 0 -4.5');
+              
+              omegaModel.removeAttribute('gltf-model');
+              omegaModel.setAttribute('visible', 'false');
+              setTimeout(() => {
+                  omegaModel.setAttribute('gltf-model', '#d-omega');
+                  omegaModel.setAttribute('visible', 'true');
+              }, 100);
+
+              btnCancel.classList.add('clickable'); omegaTerminal.classList.add('clickable');
+              if (bgVideo && wasBgmPlaying) { bgVideo.volume = window.globalBgmVol; bgVideo.play().catch(e => {}); }
+            };
+
+            let videoEl = document.querySelector(targetVideoId);
+            if(videoEl && videoEl.getAttribute('src') !== "") {
+              cinemaScreen.setAttribute('visible', 'true'); dummyText.setAttribute('visible', 'false');
+              cinemaScreen.setAttribute('src', targetVideoId); videoEl.currentTime = 0; videoEl.playbackRate = 1.0;
+              let speedBtn = document.querySelector('#btn-speed');
+              if(speedBtn) { speedBtn.setAttribute('color', '#1DB954'); speedBtn.querySelector('a-text').setAttribute('value', 'SPEED 1X'); }
+              videoEl.play().then(_ => { videoEl.onended = finishEvolution; }).catch(e => { setTimeout(finishEvolution, 3000); });
+            } else {
+              cinemaScreen.setAttribute('visible', 'false'); dummyText.setAttribute('visible', 'true');
+              dummyText.setAttribute('value', 'PLAYING OMEGAMON CUTSCENE!'); setTimeout(finishEvolution, 3000);
+            }
+          });
+
+          omegaTerminal.addEventListener('click', () => { isOmegaMenuOpen = !isOmegaMenuOpen; omegaMenu.setAttribute('visible', isOmegaMenuOpen); });
+          
+          btnCancel.addEventListener('click', () => {
+              if(!isOmegaMenuOpen) return;
+              isOmegaMenuOpen = false; 
+              omegaMenu.setAttribute('visible', 'false');
+              omegaStation.setAttribute('position', '-2 -100 -4.5'); 
+              omegaModel.setAttribute('visible', 'false');
+              btnCancel.classList.remove('clickable'); 
+              omegaTerminal.classList.remove('clickable');
+              
+              st1.setAttribute('position', '-4 0 -4'); 
+              st2.setAttribute('position', '0 0 -5');
+
+              window.isOmegamonActive = false; 
+
+              let stage1 = st1.components['evolution-station'].currentStage;
+              let stage2 = st2.components['evolution-station'].currentStage;
+
+              let d1 = st1.querySelector('.digimon-entity');
+              d1.removeAttribute('gltf-model');
+              d1.setAttribute('visible', 'false');
+
+              let d2 = st2.querySelector('.digimon-entity');
+              d2.removeAttribute('gltf-model');
+              d2.setAttribute('visible', 'false');
+
+              setTimeout(() => {
+                  d1.setAttribute('gltf-model', `#d1-${stage1}`);
+                  d1.setAttribute('visible', 'true');
+                  let btn1 = st1.querySelectorAll('.evo-btn')[stage1 - 1];
+                  st1.querySelector('.status-text').setAttribute('value', btn1.getAttribute('data-level'));
+                  
+                  d2.setAttribute('gltf-model', `#d2-${stage2}`);
+                  d2.setAttribute('visible', 'true');
+                  let btn2 = st2.querySelectorAll('.evo-btn')[stage2 - 1];
+                  st2.querySelector('.status-text').setAttribute('value', btn2.getAttribute('data-level'));
+                  
+                  scene.emit('check-jogress'); 
+              }, 100);
+          });
+        }
+      });
+    </script>
+
+    <script>
+      AFRAME.registerComponent('volume-controller', {
+        init: function () {
+          let bgVideo = document.querySelector('#bg-video');
+          if(bgVideo && Number.isFinite(window.globalBgmVol)) {
+         bgVideo.volume = window.globalBgmVol;
+          }
+          let buttons = this.el.querySelectorAll('.vol-btn');
+          buttons.forEach(btn => {
+            btn.addEventListener('click', function () {
+              let target = btn.getAttribute('data-target');
+              let action = btn.getAttribute('data-action');
+              if (target === 'bgm') {
+                if (action === 'play' && bgVideo) bgVideo.play();
+                else if (action === 'pause' && bgVideo) bgVideo.pause();
+                else if (action === 'up' && window.globalBgmVol < 1.0) window.globalBgmVol += 0.1;
+                else if (action === 'down' && window.globalBgmVol > 0.0) window.globalBgmVol -= 0.1;
+                if (action === 'up' || action === 'down') {
+                    window.globalBgmVol = Math.max(0, Math.min(1, Math.round(window.globalBgmVol * 10) / 10));
+                    document.querySelectorAll('.bgm-vol-text').forEach(el => el.setAttribute('value', (window.globalBgmVol * 100) + '%'));
+                    let labEnv = document.querySelector('#lab-environment');
+                    if(bgVideo && labEnv.getAttribute('position').y === 0) bgVideo.volume = window.globalBgmVol;
+                }
+              }
+              else if (target === 'vid') {
+                let cinemaSrc = document.querySelector('#cinema-screen').getAttribute('src');
+                let currentVid = cinemaSrc ? document.querySelector(cinemaSrc) : null;
+                if(!currentVid) return;
+                if (action === 'skip') { currentVid.pause(); if (currentVid.onended) currentVid.onended(); }
+                else if (action === 'speed') {
+                    if (currentVid.playbackRate === 1.0) { currentVid.playbackRate = 2.0; btn.setAttribute('color', '#FF9900'); btn.querySelector('a-text').setAttribute('value', 'SPEED 2X'); }
+                    else { currentVid.playbackRate = 1.0; btn.setAttribute('color', '#1DB954'); btn.querySelector('a-text').setAttribute('value', 'SPEED 1X'); }
+                }
+                else if (action === 'up' && window.globalVidVol < 1.0) window.globalVidVol += 0.1;
+                else if (action === 'down' && window.globalVidVol > 0.0) window.globalVidVol -= 0.1;
+                if (action === 'up' || action === 'down') {
+                    window.globalVidVol = Math.max(0, Math.min(1, Math.round(window.globalVidVol * 10) / 10));
+                    document.querySelectorAll('.vid-vol-text').forEach(el => el.setAttribute('value', (window.globalVidVol * 100) + '%'));
+                    currentVid.volume = window.globalVidVol;
+                }
+              }
+            });
+          });
+        }
+      });
+    </script>
+    
+    <div id="loading-panel">
+      <h3>📡 Model Loading Status</h3>
+      <div id="status-list">
+        </div>
+    </div>
+
+    <script>
+      window.addEventListener('load', () => {
+        const assets = document.querySelectorAll('a-asset-item[src$=".glb"]');
+        const statusList = document.getElementById('status-list');
+
+        let totalModels = assets.length;
+        let loadedCount = 0;
+
+        assets.forEach(asset => {
+          const id = asset.getAttribute('id');
+          const cleanName = id.replace('-glb', '').replace(/_/g, ' ');
+
+          const div = document.createElement('div');
+          div.className = 'status-item';
+          div.id = `status-${id}`;
+          div.innerHTML = `
+            <span class="status-name">${cleanName}</span> 
+            <span class="status-indicator status-loading">⏳ Loading</span>
+          `;
+          statusList.appendChild(div);
+
+          const markLoaded = () => {
+            const el = document.getElementById(`status-${id}`);
+            if (el) {
+              const indicator = el.querySelector('.status-indicator');
+              indicator.className = 'status-indicator status-loaded';
+              indicator.innerHTML = '✅ Ready';
+            }
+            loadedCount++;
+            
+            if (loadedCount === totalModels) {
+               document.querySelector('#loading-panel h3').innerHTML = '✅ All Models Loaded!';
+               document.querySelector('#loading-panel h3').style.color = '#00ff00';
+            }
+          };
+
+          if (asset.hasLoaded) {
+            markLoaded();
+          } else {
+            asset.addEventListener('loaded', markLoaded);
+          }
+        });
+      });
+    </script>
+  </head>
+
+  <body>
+    <div id="intro">
+      <h1>[ DIGITAL DIVE PROTOCOL ]</h1>
+      <p id="loading-status">SYSTEM STATUS: BOOTING...<br>DESTINATION: DIGITAL WORLD<br><span style="color: #ffff00;">[ SYNCING ASSETS... PLEASE WAIT ]</span></p>
+      <button id="dive-btn" onclick="startDiveSequence()" disabled>INITIALIZE DIVE</button>
+    </div>
+
+    <a-scene omegamon-system renderer="colorManagement: true; exposure: 1;">
+      
+      <a-assets timeout="10000">
+        <video id="bg-video" src="song\OPENING DIGIMON ALL CAST VERSION「Butterfly」Full.mp4" loop preload="auto" crossorigin="anonymous" playsinline></video>
+        <video id="v1-1" src="sound/agumon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v1-2" src="sound/greymon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v1-3" src="sound/metalgreymon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v1-4" src="sound/wargreymon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="omega-vid" src="sound/omegamon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v2-1" src="sound/gabumon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v2-2" src="sound/garurumon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v2-3" src="sound/weregarurumon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v2-4" src="sound/metalgarurumon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v3-1" src="sound/vmon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v3-2" src="sound/xvmon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v3-3" src="sound/paildramon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v3-4" src="sound/Imperialdramon.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+        <video id="v3-5" src="sound/Imperialdramon_fighter_mode.mp4" preload="none" crossorigin="anonymous" playsinline></video>
+
+        <img id="tex-floor" src="https://images.unsplash.com/photo-1581858326456-2a818c3937aa" crossorigin="anonymous">
+        <img id="tex-rug" src="https://images.unsplash.com/photo-1562582664-8a88037b1732" crossorigin="anonymous">
+        <img id="tex-poster1" src="https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=500&q=80" crossorigin="anonymous">
+        <img id="tex-poster2" src="https://images.unsplash.com/photo-1612487528505-d2338264c821?auto=format&fit=crop&w=500&q=80" crossorigin="anonymous">
+        <img id="tex-window" src="https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?auto=format&fit=crop&w=1024&q=80" crossorigin="anonymous">
+
+        <audio id="sfx-typing" src="https://actions.google.com/sounds/v1/office/keyboard_typing_fast.ogg" preload="auto" crossorigin="anonymous"></audio>
+        <audio id="sfx-gate" src="https://actions.google.com/sounds/v1/science_fiction/sci_fi_door_open.ogg" preload="auto" crossorigin="anonymous"></audio>
+        <audio id="sfx-wormhole" src="https://actions.google.com/sounds/v1/science_fiction/spaceship_interior_engine.ogg" preload="auto" crossorigin="anonymous"></audio>
+        
+        <a-asset-item id="d1-1" src="model/agumon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d1-2" src="model/greymon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d1-3" src="model/metal_greymon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d1-4" src="model/war_greymon.glb" response-type="arraybuffer"></a-asset-item>
+        
+        <a-asset-item id="d2-1" src="model/gabumon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d2-2" src="model/garurumon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d2-3" src="model/weregarurumon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d2-4" src="model/metalgarurumon.glb" response-type="arraybuffer"></a-asset-item>
+
+        <a-asset-item id="d3-1" src="model/veemon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d3-2" src="model/xv_mon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d3-3" src="model/paildramon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d3-4" src="model/imperialdramon.glb" response-type="arraybuffer"></a-asset-item>
+        <a-asset-item id="d3-5" src="model/imperialdramon_fighter_mode.glb" response-type="arraybuffer"></a-asset-item>
+
+        <a-asset-item id="d-omega" src="model/omegamon.glb" response-type="arraybuffer"></a-asset-item>
+      </a-assets>
+
+      <a-sky color="#050505"></a-sky>
+
+      <a-entity id="camera-rig" position="0 1000 0" lab-boundary>
+        <a-camera id="player-camera" position="0 1.6 0" wasd-controls="enabled: false" look-controls="enabled: true">
+          <a-cursor color="#00ffff"
+                    fuse="false"
+                    raycaster="objects: .clickable"
+                    animation__click="property: scale; startEvents: click; easing: easeInCubic; dur: 150; from: 0.1 0.1 0.1; to: 1 1 1"
+                    animation__leave="property: scale; startEvents: mouseleave; easing: easeInCubic; dur: 150; to: 1 1 1">
+          </a-cursor>
+          <a-plane id="fade-screen" width="10" height="10" position="0 0 -0.1" color="#ffffff" opacity="0" material="transparent: true; shader: flat" visible="false"></a-plane>
+        </a-camera>
+      </a-entity>
+
+      <a-entity id="start-environment" position="0 1000 0">
+        <a-box position="0 3 0" width="15" height="6" depth="15" color="#1a202c" material="side: back; roughness: 0.9"></a-box>
+        <a-plane position="0 0.01 0" rotation="-90 0 0" width="15" height="15" src="#tex-floor" material="roughness: 0.8"></a-plane>
+        <a-plane position="0 3 -7.4" width="15" height="6" color="#A0C4FF"></a-plane>
+        <a-plane position="-7.4 3 0" rotation="0 90 0" width="15" height="6" color="#8CB4F0"></a-plane>
+        <a-plane position="7.4 3 0" rotation="0 -90 0" width="15" height="6" color="#8CB4F0"></a-plane>
+        
+        <a-plane position="0 0.02 -2" rotation="-90 0 0" width="4" height="3" src="#tex-rug"></a-plane>
+        <a-cylinder position="0 4 7.4" rotation="90 0 0" radius="0.5" height="0.1" color="#ffffff"></a-cylinder>
+        <a-cylinder position="0 4 7.35" rotation="90 0 0" radius="0.45" height="0.1" color="#000000"></a-cylinder>
+
+        <a-entity position="-5 0.5 -3">
+           <a-box position="0 0 0" width="3" height="0.6" depth="6" color="#2b6cb0"></a-box>
+           <a-box position="0 0.35 1" width="3.1" height="0.1" depth="4" color="#ebf8ff"></a-box>
+           <a-box position="0 0.4 -2" width="2" height="0.2" depth="1" color="#ffffff"></a-box>
+        </a-entity>
+
+        <a-box position="-2.5 0.4 -4.5" width="1" height="0.8" depth="1" color="#8B5A2B"></a-box>
+        <a-cone position="-2.5 1 -4.5" radius-bottom="0.25" radius-top="0.1" height="0.4" color="#ffefcc" material="opacity:0.9; transparent:true"></a-cone>
+        <a-cylinder position="-2.5 0.8 -4.5" radius="0.05" height="0.2" color="#333"></a-cylinder>
+        <a-light type="point" position="-2.5 1 -4.5" intensity="0.5" color="#ffaa00" distance="5"></a-light>
+
+        <a-entity position="7.3 3 -2" rotation="0 -90 0">
+           <a-plane width="5" height="3" color="#000000"></a-plane>
+           <a-plane width="4.8" height="2.8" position="0 0 0.01" src="#tex-window" material="shader: flat"></a-plane>
+           <a-box width="5.2" height="0.2" depth="0.2" color="#fff" position="0 0 0.05"></a-box>
+           <a-box width="0.2" height="3" depth="0.2" color="#fff" position="0 0 0.05"></a-box>
+        </a-entity>
+
+        <a-plane position="-2.5 3.5 -7.3" width="1.5" height="2" src="#tex-poster1"></a-plane>
+        <a-plane position="2.5 3 -7.3" width="2" height="1.2" src="#tex-poster2"></a-plane>
+
+        <a-entity position="0 0 -5.5">
+           <a-box position="0 1 0" width="5" height="0.1" depth="2" color="#8B5A2B"></a-box>
+           <a-cylinder position="-2.3 0.5 0" radius="0.05" height="1" color="#111"></a-cylinder>
+           <a-cylinder position="2.3 0.5 0" radius="0.05" height="1" color="#111"></a-cylinder>
+           <a-box position="0 0.95 -0.9" width="4.8" height="0.05" depth="0.05" color="#00ffff" material="shader: flat"></a-box>
+        </a-entity>
+
+        <a-entity position="-6 1.5 5" rotation="0 90 0">
+           <a-box width="3" height="3" depth="0.8" color="#2d3748"></a-box>
+           <a-box position="0 0.5 0.1" width="2.8" height="0.8" depth="0.7" color="#1a202c"></a-box>
+           <a-box position="0 -0.5 0.1" width="2.8" height="0.8" depth="0.7" color="#1a202c"></a-box>
+           <a-box position="-1 0.5 0.2" width="0.2" height="0.6" depth="0.5" color="#f56565"></a-box>
+           <a-box position="-0.7 0.5 0.2" width="0.15" height="0.6" depth="0.5" color="#48bb78" rotation="0 0 10"></a-box>
+           <a-box position="0.5 -0.5 0.2" width="0.8" height="0.4" depth="0.6" color="#4299e1"></a-box>
+        </a-entity>
+
+        <a-entity position="6 0.3 6">
+           <a-cylinder radius="0.4" height="0.6" color="#8B4513"></a-cylinder>
+           <a-sphere position="0 0.8 0" radius="0.6" color="#228B22" material="roughness: 1"></a-sphere>
+           <a-sphere position="0.3 0.5 0.3" radius="0.4" color="#228B22"></a-sphere>
+           <a-sphere position="-0.3 0.6 -0.2" radius="0.45" color="#228B22"></a-sphere>
+        </a-entity>
+
+        <a-entity position="1.8 0.5 -3.8" rotation="0 -30 0">
+           <a-box position="0 0 0" width="0.8" height="0.1" depth="0.8" color="#111"></a-box>
+           <a-box position="0 0.6 0.35" width="0.8" height="1.2" depth="0.1" color="#111"></a-box>
+           <a-box position="0 0.6 0.36" width="0.6" height="1.0" depth="0.1" color="#e53e3e"></a-box>
+           <a-cylinder position="0 -0.3 0" radius="0.05" height="0.6" color="#718096"></a-cylinder>
+           <a-box position="0 -0.5 0" width="0.8" height="0.05" depth="0.8" color="#111"></a-box>
+        </a-entity>
+
+        <a-light type="ambient" color="#2d3748" intensity="0.8"></a-light>
+        <a-light type="point" position="0 4 0" intensity="0.6" color="#e2e8f0" distance="15"></a-light>
+        <a-light type="point" position="0 1.5 -5" intensity="1" color="#00ffff" distance="4"></a-light>
+
+        <a-entity id="native-pc-model" position="0 1.05 -5.2">
+            <a-entity position="0 0 0">
+                <a-box position="0 0.7 -0.2" width="2.4" height="1.4" depth="0.1" color="#111"></a-box>
+                <a-cylinder position="0 0 -0.3" radius="0.3" height="0.05" color="#222"></a-cylinder>
+                <a-box position="0 0.3 -0.4" width="0.1" height="0.6" depth="0.1" color="#111" rotation="10 0 0"></a-box>
+                <a-plane position="0 0.7 -0.14" width="2.3" height="1.3" color="#001a33" material="shader: flat"></a-plane>
+                <a-plane id="pc-screen-cover" position="0 0.7 -0.13" width="2.3" height="1.3" color="#000000" material="shader: flat" visible="false">
+                    <a-text id="typewriter-text" value="" position="-1.0 0.4 0.01" align="left" color="#00ffff" scale="0.5 0.5 0.5"></a-text>
+                </a-plane>
+            </a-entity>
+
+            <a-entity position="-2.2 0 0.2" rotation="0 25 0">
+                <a-box position="0 0.7 -0.2" width="2.0" height="1.2" depth="0.1" color="#111"></a-box>
+                <a-cylinder position="0 0 -0.3" radius="0.2" height="0.05" color="#222"></a-cylinder>
+                <a-box position="0 0.3 -0.4" width="0.1" height="0.6" depth="0.1" color="#111" rotation="10 0 0"></a-box>
+                <a-plane position="0 0.7 -0.14" width="1.9" height="1.1" color="#112211" material="shader: flat"></a-plane>
+                <a-text value="[ SYSTEM MONITOR ]\nCPU: 45%\nMEM: 16GB\nNET: CONNECTED" position="0 0.7 -0.13" align="center" color="#00ff00" scale="0.4 0.4 0.4"></a-text>
+            </a-entity>
+
+            <a-box position="-1.5 0.2 0.2" width="0.3" height="0.5" depth="0.3" color="#111" rotation="0 15 0"></a-box>
+            <a-box position="1.5 0.2 0.2" width="0.3" height="0.5" depth="0.3" color="#111" rotation="0 -15 0"></a-box>
+
+            <a-plane position="0 0.01 0.6" width="2" height="0.8" color="#111" rotation="-90 0 0"></a-plane>
+            <a-box position="-0.2 0.05 0.6" width="1.2" height="0.05" depth="0.4" color="#222" rotation="5 0 0"></a-box>
+            <a-plane position="-0.2 0.08 0.6" width="1.1" height="0.3" color="#00ffff" material="shader: flat; opacity: 0.5" rotation="-85 0 0"></a-plane>
+            <a-box position="0.6 0.05 0.6" width="0.15" height="0.05" depth="0.25" color="#222"></a-box>
+
+            <a-box position="2.2 0.3 -0.2" width="0.8" height="1" depth="1.5" color="#111" rotation="0 -10 0"></a-box>
+            <a-plane position="1.81 0.3 -0.1" width="1.3" height="0.8" color="#000" opacity="0.8" rotation="0 -100 0"></a-plane>
+            <a-box position="2.0 0.3 -0.1" width="0.1" height="0.7" depth="1" color="#00ffff" material="shader: flat; opacity: 0.8" rotation="0 -10 0"></a-box>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="digital-wormhole" position="0 1000 -5" visible="false">
+          <a-cylinder radius="20" height="200" rotation="90 0 0" material="color: #000a22; side: back; shader: flat"></a-cylinder>
+          
+          <a-cylinder radius="19" height="200" segments-radial="32" segments-height="60" rotation="90 0 0" material="color: #00aaff; wireframe: true; shader: flat; transparent: true; opacity: 0.3" animation="property: position; from: 0 0 -20; to: 0 0 0; dur: 500; loop: true; easing: linear"></a-cylinder>
+          
+          <a-entity animation="property: position; from: 0 0 -100; to: 0 0 0; dur: 1000; loop: true; easing: linear">
+              <a-torus radius="18" radius-tubular="0.1" color="#00ffff" position="0 0 0" material="shader: flat"></a-torus>
+              <a-torus radius="18" radius-tubular="0.15" color="#00ffcc" position="0 0 -33" material="shader: flat"></a-torus>
+              <a-torus radius="18" radius-tubular="0.08" color="#ffffff" position="0 0 -66" material="shader: flat"></a-torus>
+              <a-torus radius="18" radius-tubular="0.1" color="#00ffff" position="0 0 -100" material="shader: flat"></a-torus>
+          </a-entity>
+
+          <a-entity animation="property: position; from: 0 0 -100; to: 0 0 0; dur: 400; loop: true; easing: linear">
+              <a-box position="4 5 0" width="0.1" height="0.1" depth="15" color="#00ffff" material="shader: flat"></a-box>
+              <a-box position="-5 -3 -25" width="0.1" height="0.1" depth="20" color="#00ffcc" material="shader: flat"></a-box>
+              <a-box position="6 -6 -50" width="0.15" height="0.15" depth="10" color="#ffffff" material="shader: flat"></a-box>
+              <a-box position="-7 6 -75" width="0.1" height="0.1" depth="25" color="#0055ff" material="shader: flat"></a-box>
+          </a-entity>
+      </a-entity>
+
+      <a-entity id="lab-environment" position="0 0 0">
+        <a-cylinder position="0 0 0" radius="12" height="16" side="back" color="#03060a" metalness="0.9" roughness="0.4"></a-cylinder>
+        <a-circle position="0 0 0" rotation="-90 0 0" radius="12" color="#010204" metalness="0.8" roughness="0.2"></a-circle>
+        <a-circle position="0 0.02 0" rotation="-90 0 0" radius="12" material="color: #00ffff; wireframe: true; transparent: true; opacity: 0.15"></a-circle>
+        <a-ring position="0 0.03 0" rotation="-90 0 0" radius-inner="11.5" radius-outer="11.9" material="color: #00ffff; shader: flat; opacity: 0.8"></a-ring>
+        <a-ring position="0 0.03 0" rotation="-90 0 0" radius-inner="7.5" radius-outer="7.6" material="color: #00AAFF; shader: flat; opacity: 0.5"></a-ring>
+        <a-circle position="0 15 0" rotation="90 0 0" radius="12" color="#010204" metalness="0.8"></a-circle>
+        <a-ring position="0 14.9 0" rotation="90 0 0" radius-inner="11.5" radius-outer="11.9" material="color: #00ffff; shader: flat; opacity: 0.8"></a-ring>
+        <a-torus position="0 14.9 0" rotation="90 0 0" radius="4" radius-tubular="0.05" material="color: #00ffff; shader: flat"></a-torus>
+
+        <a-box position="11.8 7.5 0" width="0.5" height="15" depth="2" color="#111" metalness="0.8"></a-box>
+        <a-box position="-11.8 7.5 0" width="0.5" height="15" depth="2" color="#111" metalness="0.8"></a-box>
+        <a-box position="0 7.5 11.8" width="2" height="15" depth="0.5" color="#111" metalness="0.8"></a-box>
+        <a-box position="0 7.5 -11.8" width="2" height="15" depth="0.5" color="#111" metalness="0.8"></a-box>
+
+        <a-light type="ambient" color="#0c1824" intensity="1.2"></a-light>
+        <a-light type="point" intensity="1.5" position="0 10 0" color="#ccffff" distance="25"></a-light>
+        <a-light type="point" intensity="0.5" position="0 2 0" color="#00ffff" distance="12"></a-light>
+
+        <a-entity position="-5.5 2.5 2" rotation="0 90 0">
+          <a-video src="#bg-video" width="6.4" height="3.6" position="0 0 0"></a-video>
+          <a-entity volume-controller position="0 -2.05 0.01">
+            <a-plane width="6.4" height="0.5" color="#0a0a0a" opacity="0.95" material="shader: flat"></a-plane>
+            <a-plane class="vol-btn clickable" data-target="bgm" data-action="play" position="-2.4 0 0.01" width="1.2" height="0.3" color="#1DB954" material="shader: flat" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="PLAY" align="center" color="#121212"></a-text></a-plane>
+            <a-plane class="vol-btn clickable" data-target="bgm" data-action="pause" position="-1.0 0 0.01" width="1.2" height="0.3" color="#282828" material="shader: flat" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="PAUSE" align="center" color="#FFF"></a-text></a-plane>
+            <a-text value="VOL:" position="0.8 0 0.01" align="left" color="#b3b3b3" width="3" material="shader: flat"></a-text>
+            <a-text class="bgm-vol-text" value="10%" position="1.4 0 0.01" align="center" color="#FFF" width="3" material="shader: flat"></a-text>
+            <a-plane class="vol-btn clickable" data-target="bgm" data-action="down" position="2.2 0 0.01" width="0.4" height="0.3" color="#282828" material="shader: flat" animation__enter="property: scale; to: 1.1 1.1 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="-" align="center" color="#FFF" width="5"></a-text></a-plane>
+            <a-plane class="vol-btn clickable" data-target="bgm" data-action="up" position="2.7 0 0.01" width="0.4" height="0.3" color="#282828" material="shader: flat" animation__enter="property: scale; to: 1.1 1.1 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="+" align="center" color="#FFF" width="5"></a-text></a-plane>
+          </a-entity>
+        </a-entity>
+
+        <a-entity id="omegamon-altar" position="-2 2.5 -4.5" visible="false">
+            <a-plane width="5.5" height="1" color="#000" opacity="0.7" position="0 1.2 -0.05"></a-plane>
+            <a-text id="omega-status" value="REQUIRE: WARGREYMON + METALGARURUMON" position="0 1.2 0" align="center" color="#FF0055" width="6"></a-text>
+            <a-cylinder color="#FF9900" radius="0.02" height="3" position="-1.2 -1 0" rotation="0 0 -45" material="shader: flat; opacity: 0.6"></a-cylinder>
+            <a-cylinder color="#00AAFF" radius="0.02" height="3" position="1.2 -1 0" rotation="0 0 45" material="shader: flat; opacity: 0.6"></a-cylinder>
+            <a-box id="btn-omegamon" class="clickable" width="2.5" height="0.6" depth="0.2" color="#FFFFFF" material="shader: flat" animation__glow="property: scale; to: 1.05 1.05 1.05; dir: alternate; dur: 800; loop: true" animation__enter="property: color; to: #FFDDDD; startEvents: mouseenter; dur: 200" animation__leave="property: color; to: #FFFFFF; startEvents: mouseleave; dur: 200">
+                <a-text value="JOGRESS EVOLUTION\n[ OMEGAMON ]" position="0 0 0.11" align="center" color="#FF0000" width="4"></a-text>
+            </a-box>
+        </a-entity>
+
+        <a-entity id="omegamon-station" position="-2 -100 -4.5" rotation="0 25 0">
+          <a-cylinder position="0 0.05 0" radius="2.5" height="0.15" color="#222" metalness="0.8"></a-cylinder>
+          <a-cylinder position="0 0.15 0" radius="2.3" height="0.05" material="color: #FFD700; shader: flat; opacity: 0.8"></a-cylinder>
+          <a-cylinder position="0 2 0" radius="2.3" height="4" material="color: #FFD700; transparent: true; opacity: 0.1; side: double; depthWrite: false" open-ended="true"></a-cylinder>
+          
+          <a-light type="point" intensity="1.0" position="0 3 0" color="#FFD700" distance="8"></a-light>
+          
+          <a-entity id="omega-model" auto-fit="maxWidth: 3.8; maxHeight: 4.5; maxDepth: 3.8" position="0 0.5 0" visible="false" animation="property: position; to: 0 0.8 0; dir: alternate; dur: 2000; loop: true"></a-entity>
+          
+          <a-entity position="0 4.5 0">
+            <a-plane width="3.5" height="1" color="#000" opacity="0.6" position="0 0 -0.05"></a-plane>
+            <a-text value="OMEGAMON\n(JOGRESS)" color="#FFD700" align="center" width="9"></a-text>
+          </a-entity>
+          
+          <a-entity position="0 0 3">
+            <a-cylinder position="0 0.5 0" radius="0.1" height="1.2" color="#333" metalness="0.6"></a-cylinder>
+            <a-box id="omega-terminal" class="clickable" width="1.2" height="0.1" depth="0.6" color="#333" position="0 1.1 0" rotation="25 0 0" animation__enter="property: scale; to: 1.05 1.05 1.05; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150">
+                <a-plane width="1.1" height="0.5" position="0 0.06 0" rotation="-90 0 0" color="#FFD700" material="shader: flat"></a-plane>
+                <a-text value="TERMINAL" position="0 0.07 0" rotation="-90 0 0" align="center" color="#111" width="3"></a-text>
+            </a-box>
+            <a-entity id="omega-menu" position="0 2.6 -0.5" visible="false">
+              <a-plane width="2.3" height="1.1" material="color: #FFD700; shader: flat; opacity: 0.6" position="0 0 -0.12"></a-plane>
+              <a-plane width="2.2" height="1.0" color="#05080c" opacity="0.95" position="0 0 -0.1"></a-plane>
+              <a-plane id="btn-cancel-jogress" class="clickable" width="1.8" height="0.5" position="0 0 0" color="#FF0000" material="shader: flat" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150">
+                  <a-text value="DE-JOGRESS\n(SEPARATE)" position="0 0 0.01" align="center" color="#FFF" width="3"></a-text>
+              </a-plane>
+            </a-entity>
+          </a-entity>
+        </a-entity>
+
+        <a-entity id="station1" class="station" data-station-id="station1" evolution-station position="-4 0 -4" rotation="0 45 0">
+          <a-cylinder position="0 0.05 0" radius="2" height="0.15" color="#111" metalness="0.8"></a-cylinder>
+          <a-cylinder position="0 0.15 0" radius="1.8" height="0.05" material="color: #ffcc00; shader: flat; opacity: 0.8"></a-cylinder>
+          <a-cylinder position="0 2 0" radius="1.8" height="4" material="color: #ffcc00; transparent: true; opacity: 0.1; side: double; depthWrite: false" open-ended="true"></a-cylinder>
+          <a-light type="point" intensity="0.8" position="0 3 0" color="#ffcc00" distance="6"></a-light>
+          
+          <a-entity class="digimon-entity" gltf-model="#d1-1" auto-fit="maxWidth: 2.8; maxHeight: 3.5; maxDepth: 2.8" position="0 0.5 0" visible="true" animation="property: position; to: 0 0.7 0; dir: alternate; dur: 2000; loop: true"></a-entity>
+          
+          <a-entity position="0 4.5 0">
+            <a-plane width="3" height="1" color="#000" opacity="0.6" position="0 0 -0.05"></a-plane>
+            <a-text class="status-text" value="Agumon" color="#00FF00" align="center" width="7"></a-text>
+          </a-entity>
+
+          <a-entity position="0 0 2.8">
+            <a-cylinder position="0 0.5 0" radius="0.1" height="1.2" color="#222"></a-cylinder>
+            <a-box class="main-terminal clickable" width="1.2" height="0.1" depth="0.6" color="#333" position="0 1.1 0" rotation="25 0 0" animation__enter="property: scale; to: 1.05 1.05 1.05; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150">
+              <a-plane width="1.1" height="0.5" position="0 0.06 0" rotation="-90 0 0" color="#ffcc00" material="shader: flat"></a-plane>
+              <a-text value="TERMINAL 1" position="0 0.07 0" rotation="-90 0 0" align="center" color="#111" width="3"></a-text>
+            </a-box>
+            <a-entity class="evolution-menu" position="0 2.6 -0.5" visible="false">
+              <a-plane width="2.4" height="3.2" material="color: #ffcc00; shader: flat; opacity: 0.6" position="0 0 -0.12"></a-plane>
+              <a-plane width="2.3" height="3.1" color="#05080c" opacity="0.95" position="0 0 -0.1"></a-plane>
+              <a-plane class="evo-btn" data-model="#d1-1" data-level="Agumon" data-color="#00FF00" data-video="#v1-1" width="1.8" height="0.4" position="0 1.0 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Agumon" position="0 0 0.01" align="center" color="#00FF00" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d1-2" data-level="Greymon" data-color="#00AAFF" data-video="#v1-2" width="1.8" height="0.4" position="0 0.5 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Greymon" position="0 0 0.01" align="center" color="#00AAFF" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d1-3" data-level="Metal-Greymon" data-color="#AA00FF" data-video="#v1-3" width="1.8" height="0.4" position="0 0.0 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Metal-Greymon" position="0 0 0.01" align="center" color="#AA00FF" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d1-4" data-level="War-Greymon" data-color="#FF9900" data-video="#v1-4" width="1.8" height="0.4" position="0 -0.5 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="War-Greymon" position="0 0 0.01" align="center" color="#FF9900" width="3"></a-text></a-plane>
+            </a-entity>
+          </a-entity>
+        </a-entity>
+
+        <a-entity id="station2" class="station" data-station-id="station2" evolution-station position="0 0 -5" rotation="0 0 0">
+          <a-cylinder position="0 0.05 0" radius="2" height="0.15" color="#111" metalness="0.8"></a-cylinder>
+          <a-cylinder position="0 0.15 0" radius="1.8" height="0.05" material="color: #44ff44; shader: flat; opacity: 0.8"></a-cylinder>
+          <a-cylinder position="0 2 0" radius="1.8" height="4" material="color: #44ff44; transparent: true; opacity: 0.1; side: double; depthWrite: false" open-ended="true"></a-cylinder>
+
+          <a-light type="point" intensity="0.8" position="0 3 0" color="#44ff44" distance="6"></a-light>
+          
+          <a-entity class="digimon-entity" gltf-model="#d2-1" auto-fit="maxWidth: 2.8; maxHeight: 3.5; maxDepth: 2.8" position="0 0.5 0" visible="true" animation="property: position; to: 0 0.7 0; dir: alternate; dur: 2200; loop: true"></a-entity>
+          
+          <a-entity position="0 4.5 0">
+            <a-plane width="3" height="1" color="#000" opacity="0.6" position="0 0 -0.05"></a-plane>
+            <a-text class="status-text" value="Gabumon" color="#00FF00" align="center" width="7"></a-text>
+          </a-entity>
+
+          <a-entity position="0 0 2.8">
+            <a-cylinder position="0 0.5 0" radius="0.1" height="1.2" color="#222"></a-cylinder>
+            <a-box class="main-terminal clickable" width="1.2" height="0.1" depth="0.6" color="#333" position="0 1.1 0" rotation="25 0 0" animation__enter="property: scale; to: 1.05 1.05 1.05; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150">
+              <a-plane width="1.1" height="0.5" position="0 0.06 0" rotation="-90 0 0" color="#44ff44" material="shader: flat"></a-plane>
+              <a-text value="TERMINAL 2" position="0 0.07 0" rotation="-90 0 0" align="center" color="#111" width="3"></a-text>
+            </a-box>
+            <a-entity class="evolution-menu" position="0 2.6 -0.5" visible="false">
+              <a-plane width="2.4" height="3.2" material="color: #44ff44; shader: flat; opacity: 0.6" position="0 0 -0.12"></a-plane>
+              <a-plane width="2.3" height="3.1" color="#05080c" opacity="0.95" position="0 0 -0.1"></a-plane>
+              <a-plane class="evo-btn" data-model="#d2-1" data-level="Gabumon" data-color="#00FF00" data-video="#v2-1" width="1.8" height="0.4" position="0 1.0 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Gabumon" position="0 0 0.01" align="center" color="#00FF00" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d2-2" data-level="Garurumon" data-color="#00AAFF" data-video="#v2-2" width="1.8" height="0.4" position="0 0.5 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Garurumon" position="0 0 0.01" align="center" color="#00AAFF" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d2-3" data-level="Were-Garurumon" data-color="#AA00FF" data-video="#v2-3" width="1.8" height="0.4" position="0 0.0 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Were-Garurumon" position="0 0 0.01" align="center" color="#AA00FF" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d2-4" data-level="Metal-Garurumon" data-color="#FF9900" data-video="#v2-4" width="1.8" height="0.4" position="0 -0.5 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Metal-Garurumon" position="0 0 0.01" align="center" color="#FF9900" width="3"></a-text></a-plane>
+            </a-entity>
+          </a-entity>
+        </a-entity>
+
+        <a-entity class="station" data-station-id="station3" evolution-station position="4 0 -4" rotation="0 -45 0">
+          <a-cylinder position="0 0.05 0" radius="2" height="0.15" color="#111" metalness="0.8"></a-cylinder>
+          <a-cylinder position="0 0.15 0" radius="1.8" height="0.05" material="color: #ff4444; shader: flat; opacity: 0.8"></a-cylinder>
+          <a-cylinder position="0 2 0" radius="1.8" height="4" material="color: #ff4444; transparent: true; opacity: 0.1; side: double; depthWrite: false" open-ended="true"></a-cylinder>
+
+          <a-light type="point" intensity="0.8" position="0 3 0" color="#ff4444" distance="6"></a-light>
+          
+          <a-entity class="digimon-entity" gltf-model="#d3-1" auto-fit="maxWidth: 2.8; maxHeight: 3.5; maxDepth: 2.8" position="0 0.5 0" visible="true" animation="property: position; to: 0 0.7 0; dir: alternate; dur: 2400; loop: true"></a-entity>
+          
+          <a-entity position="0 4.5 0">
+            <a-plane width="3" height="1" color="#000" opacity="0.6" position="0 0 -0.05"></a-plane>
+            <a-text class="status-text" value="V-mon" color="#00FF00" align="center" width="7"></a-text>
+          </a-entity>
+
+          <a-entity position="0 0 2.8">
+            <a-cylinder position="0 0.5 0" radius="0.1" height="1.2" color="#222"></a-cylinder>
+            <a-box class="main-terminal clickable" width="1.2" height="0.1" depth="0.6" color="#333" position="0 1.1 0" rotation="25 0 0" animation__enter="property: scale; to: 1.05 1.05 1.05; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150">
+              <a-plane width="1.1" height="0.5" position="0 0.06 0" rotation="-90 0 0" color="#ff4444" material="shader: flat"></a-plane>
+              <a-text value="TERMINAL 3" position="0 0.07 0" rotation="-90 0 0" align="center" color="#FFF" width="3"></a-text>
+            </a-box>
+            <a-entity class="evolution-menu" position="0 2.6 -0.5" visible="false">
+              <a-plane width="2.4" height="3.2" material="color: #ff4444; shader: flat; opacity: 0.6" position="0 0 -0.12"></a-plane>
+              <a-plane width="2.3" height="3.1" color="#05080c" opacity="0.95" position="0 0 -0.1"></a-plane>
+              <a-plane class="evo-btn" data-model="#d3-1" data-level="V-mon" data-color="#00FF00" data-video="#v3-1" width="1.8" height="0.4" position="0 1.0 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="V-mon" position="0 0 0.01" align="center" color="#00FF00" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d3-2" data-level="XV-mon" data-color="#00AAFF" data-video="#v3-2" width="1.8" height="0.4" position="0 0.5 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="XV-mon" position="0 0 0.01" align="center" color="#00AAFF" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d3-3" data-level="Paildaramon" data-color="#AA00FF" data-video="#v3-3" width="1.8" height="0.4" position="0 0.0 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Paildaramon" position="0 0 0.01" align="center" color="#AA00FF" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d3-4" data-level="Imperialdramaon" data-color="#FF9900" data-video="#v3-4" width="1.8" height="0.4" position="0 -0.5 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Imperialdramaon" position="0 0 0.01" align="center" color="#FF9900" width="3"></a-text></a-plane>
+              <a-plane class="evo-btn" data-model="#d3-5" data-level="Imperialdramaon-Fight-Mode" data-color="#FF0055" data-video="#v3-5" width="1.8" height="0.4" position="0 -1.0 0" color="#1a2b3c" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="Imperialdramaon-Fight-Mode" position="0 0 0.01" align="center" color="#FF0055" width="3"></a-text></a-plane>
+            </a-entity>
+          </a-entity>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="cinema-environment" position="0 500 0" visible="false">
+        <a-video id="cinema-screen" width="14" height="7.875" position="0 2 -4.5" visible="false"></a-video>
+        <a-text id="dummy-text" value="" position="0 2 -4.4" align="center" color="#FFFFFF" width="15" visible="false"></a-text>
+
+        <a-plane color="#000000" material="shader: flat" width="60" height="60" position="-20 0 0" rotation="0 90 0"></a-plane>
+        <a-plane color="#000000" material="shader: flat" width="60" height="60" position="20 0 0" rotation="0 -90 0"></a-plane>
+        <a-plane color="#000000" material="shader: flat" width="60" height="60" position="0 0 4" rotation="0 180 0"></a-plane>
+        <a-plane color="#000000" material="shader: flat" width="60" height="60" position="0 20 0" rotation="90 0 0"></a-plane>
+        <a-plane color="#000000" material="shader: flat" width="60" height="60" position="0 -20 0" rotation="-90 0 0"></a-plane>
+
+        <a-entity volume-controller position="0 -1.0 -2.5" rotation="-25 0 0" scale="0.9 0.9 0.9">
+          <a-plane width="2.4" height="1.0" color="#05080c" opacity="0.9" material="shader: flat"></a-plane>
+          <a-plane width="2.45" height="1.05" material="color: #00ffff; wireframe: true; shader: flat" position="0 0 -0.01"></a-plane>
+          
+          <a-text value="[ CINEMA CONTROLS ]" position="0 0.35 0.01" align="center" color="#00FFFF" width="2.5"></a-text>
+          <a-text value="VOL:" position="-0.8 0.05 0.01" align="left" color="#FFF" width="2"></a-text>
+          <a-text class="vid-vol-text" value="100%" position="-0.2 0.05 0.01" align="center" color="#00FF00" width="2"></a-text>
+
+          <a-plane class="vol-btn clickable" data-target="vid" data-action="down" position="0.3 0.05 0.01" width="0.3" height="0.2" color="#ff4444" material="shader: flat" animation__enter="property: scale; to: 1.1 1.1 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="-" align="center" color="#FFF" position="0 0 0.01"></a-text></a-plane>
+          <a-plane class="vol-btn clickable" data-target="vid" data-action="up" position="0.7 0.05 0.01" width="0.3" height="0.2" color="#44ff44" material="shader: flat" animation__enter="property: scale; to: 1.1 1.1 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="+" align="center" color="#FFF" position="0 0 0.01"></a-text></a-plane>
+          <a-plane id="btn-speed" class="vol-btn clickable" data-target="vid" data-action="speed" position="-0.4 -0.25 0.01" width="0.8" height="0.25" color="#1DB954" material="shader: flat" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="SPEED 1X" align="center" color="#121212" position="0 0 0.01" width="3"></a-text></a-plane>
+          <a-plane class="vol-btn clickable" data-target="vid" data-action="skip" position="0.5 -0.25 0.01" width="0.8" height="0.25" color="#ffaa00" material="shader: flat" animation__enter="property: scale; to: 1.05 1.05 1; startEvents: mouseenter; dur: 150" animation__leave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 150"><a-text value="SKIP >>" align="center" color="#121212" position="0 0 0.01" width="3"></a-text></a-plane>
+        </a-entity>
+      </a-entity>
+    </a-scene>
+  </body>
+</html>
