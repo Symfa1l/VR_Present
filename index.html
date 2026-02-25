@@ -81,24 +81,24 @@
     </style>
     
     <script>
-      // ระบบปรับขนาดขั้นสุดยอด บังคับให้อยู่ในกรอบแท่น และหันหน้าตรงเสมอ
       AFRAME.registerComponent('auto-fit', {
         schema: {
-          maxWidth: { type: 'number', default: 2.8 },  // ความกว้างสูงสุด (ไม่ล้นฐานแท่น)
-          maxHeight: { type: 'number', default: 3.5 }, // ความสูงสูงสุด (หัวไม่ทะลุเพดาน)
-          maxDepth: { type: 'number', default: 2.8 }   // ความลึกสูงสุด
+          maxWidth: { type: 'number', default: 2.8 },  
+          maxHeight: { type: 'number', default: 3.5 }, // เราจะใช้ค่านี้เป็น "ความสูงมาตรฐาน" ให้ทุกตัว
+          maxDepth: { type: 'number', default: 2.8 }  
         },
         init: function () {
           this.el.addEventListener('model-loaded', () => {
+            
+            this.el.setAttribute('scale', '1 1 1');
+
             setTimeout(() => {
               let mesh = this.el.getObject3D('mesh');
               if (!mesh) return;
 
-              // ล้างค่าเก่าทั้งหมด เพื่อให้คำนวณจากขนาดออริจินัล (1:1) ใหม่ทุกครั้ง
-              this.el.object3D.scale.set(1, 1, 1);
-              this.el.object3D.rotation.set(0, 0, 0); // บังคับให้ Entity หันหน้าตรง
+              // 2. รีเซ็ตตำแหน่งและมุมของ Mesh ภายใน (ไม่ไปกวน Rotation ของ Entity หลัก)
               mesh.position.set(0, 0, 0);
-              mesh.rotation.set(0, 0, 0); // บังคับ Mesh ภายในให้หันหน้าตรง
+              mesh.rotation.set(0, 0, 0); 
               mesh.updateMatrixWorld(true);
 
               let box = new THREE.Box3().setFromObject(mesh);
@@ -108,7 +108,15 @@
               box.getSize(size);
 
               if (size.x <= 0.001 || size.y <= 0.001 || size.z <= 0.001) return;
-              if (!isFinite(size.x) || !isFinite(size.y) || !isFinite(size.z)) return;
+
+              let finalScale = this.data.maxHeight / size.y;
+              
+ 
+              let scaleX = this.data.maxWidth / size.x;
+              let scaleZ = this.data.maxDepth / size.z;
+              
+              // ถ้าล้นแท่น ถึงจะยอมบีบสเกลลงมา (ใช้ค่าน้อยสุด)
+              finalScale = Math.min(finalScale, scaleX, scaleZ);
 
               let worldCenter = new THREE.Vector3();
               box.getCenter(worldCenter);
@@ -117,19 +125,12 @@
               // ดึงเข้ากึ่งกลางแท่นพอดีเป๊ะ
               mesh.position.x = -localCenter.x;
               mesh.position.z = -localCenter.z;
-              // ดันให้เท้าแตะพื้นแท่นพอดี
+              // ดันให้เท้าแตะพื้นแท่นพอดี (Y = 0 ของแท่น)
               mesh.position.y = -(localCenter.y - (size.y / 2));
 
-              // คำนวณ Scale ใหม่เพื่อให้ฟิตพอดีกับกรอบของแท่น
-              let scaleX = this.data.maxWidth / size.x;
-              let scaleY = this.data.maxHeight / size.y;
-              let scaleZ = this.data.maxDepth / size.z;
-              
-              // ใช้ค่าน้อยสุด เพื่อรับประกันว่าไม่มีส่วนไหนทะลุกรอบออกไปเด็ดขาด
-              let finalScale = Math.min(scaleX, scaleY, scaleZ);
-              
+              // 3. อัปเดต Scale ผ่านระบบของ A-Frame เพื่อบันทึกค่าที่ถูกต้อง
               this.el.setAttribute('scale', `${finalScale} ${finalScale} ${finalScale}`);
-            }, 100);
+            }, 150); // เพิ่ม delay นิดหน่อยให้ชัวร์ว่าโหลดกราฟิกเคลียร์เสร็จ
           });
         }
       });
@@ -1046,5 +1047,4 @@
       </a-entity>
     </a-scene>
   </body>
-
 </html>
